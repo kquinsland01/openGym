@@ -51,3 +51,6 @@ Notes:
   overwrites whatever a client sent; pass that through with `CF_CONNECTING_IP` on the `web`
   container (as `.env.example` describes for Cloudflare), turn on `TRUST_PROXY=1` on the `api`
   container, and add a NetworkPolicy so only the web container's pod reaches port 3000.
+
+For IPv6 listeners, AAAA-only API Services, and IPv4-only compatibility, see
+[IPv4 and IPv6 web networking](IPV6.md).

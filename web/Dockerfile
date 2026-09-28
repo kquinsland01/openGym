@@ -44,12 +44,16 @@ LABEL maintainer="Duarte Santos https://gitlab.com/DuarteSantos8" \
     org.opencontainers.image.revision=$VCS_REF \
     org.opencontainers.image.created=$BUILD_DATE
 
+COPY --chmod=755 web/15-network.envsh /docker-entrypoint.d/15-opengym-network.envsh
 COPY web/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 # exercise media (img/gif) is mounted at runtime from the media volume
 
 # Set Default ENVs for nginx
 ENV NGINX_PORT=80
+# Disable only on hosts without IPv6 sockets; DNS AAAA resolution is independent.
+ENV NGINX_IPV6=on
+ENV RESOLVER_IPV6=on
 ENV BACKEND=api
 ENV PORT=3000
 # The DNS nginx asks about BACKEND on every /api request. Docker's embedded resolver by
@@ -73,8 +77,7 @@ ENV MEDIA_UPLOAD_MAX=48m
 
 # Probe the port nginx was actually told to listen on (NGINX_PORT is configurable, so a
 # hardcoded http://localhost/ breaks on any instance that changed it), and address it as
-# 127.0.0.1: envsubst rewrites the conf after the image's IPv6 script, so nginx ends up
-# listening on IPv4 only while "localhost" resolves to ::1 first.
+# 127.0.0.1 so this check also works when NGINX_IPV6=off.
 HEALTHCHECK --interval=5m \
             --timeout=5s \
             --retries=3 \

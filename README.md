@@ -198,6 +198,8 @@ All via `.env` (see `.env.example`):
 | `ORIGIN`      | Full URL the app is served from                      | `http://localhost:8080` |
 | `WEB_PORT`    | Host port for the web UI                             | `8080`                  |
 | `NGINX_PORT`  | Port the web container listens on, inside the container | `80`                 |
+| `NGINX_IPV6` | Enable the IPv6 listener (see [IPv6 networking](docs/IPV6.md)) | `on` |
+| `RESOLVER_IPV6` | Resolve AAAA records for API upstreams | `on` |
 | `BACKEND`     | Name of the API service that `/api` is proxied to — change it if yours isn't called `api` | `api` |
 | `PORT`        | Port the API listens on; the web container proxies to the same value | `3000`  |
 | `RP_NAME`     | Name shown in the passkey prompt                     | `openGym`               |
