@@ -39,7 +39,11 @@ both together. Mounted key updates alone do not reload the runner's verifier.
 For a different API UID/GID, adjust the pod fsGroup and the runner's socket group
 alongside Secret readability; keep runner UID distinct from the API's UID.
 
-The runner admits one request at a time, with no job queue. It caps the request at
+The runner admits one execution at a time, with no job queue. The API serializes
+remote Coach jobs in its existing queue; HTTP providers retain two-job concurrency.
+Credential-free capability checks finish once at runner startup, before it accepts
+work. Their cached results remain responsive during a job; status checks spawn no
+processes alongside it. At most eight request bodies are admitted. It caps the request at
 1 MiB, response at 4 MiB, execution at five minutes, incoming body time at five
 seconds and connections at eight. Busy, missing, invalid or disconnected runners
 fail the Coach job; the API never falls back to local execution. Each request gets

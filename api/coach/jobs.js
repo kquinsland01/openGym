@@ -257,7 +257,10 @@ export function enqueue(uid, opts) {
 }
 
 function pump() {
-  while (running < MAX_CONCURRENT && queue.length) {
+  // The isolated runner has one execution slot. Keep work in this existing API
+  // queue rather than sending normal parallel users into a 503/quota failure.
+  const limit = adapterFor(cfgStore.load().provider)?.remote ? 1 : MAX_CONCURRENT;
+  while (running < limit && queue.length) {
     const job = queue.shift();
     running++;
     execute(job)

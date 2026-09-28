@@ -16,7 +16,7 @@ function signed(body, key = keys.privateKey) {
 test('runner accepts signed fixed-provider jobs and rejects unauthenticated, tampered and replayed requests', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-test-'));
   const socketPath = path.join(dir, 'runner.sock');
-  const server = createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
+  const server = await createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
   await new Promise(resolve => server.listen(socketPath, resolve));
   t.after(async () => { await new Promise(resolve => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
   function send(body, headers = {}) { return new Promise((resolve, reject) => { const req = http.request({ socketPath, path: '/v1/job', method: 'POST', headers }, res => { let text = ''; res.on('data', d => text += d); res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) })); }); req.on('error', reject); req.end(body); }); }
@@ -38,7 +38,7 @@ test('protocol rejects arbitrary paths/env, providers, credentials, oversized pr
 test('runner bounds concurrent jobs, kills timed-out workers and recovers capacity', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-limit-'));
   const socketPath = path.join(dir, 'runner.sock');
-  const server = createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
+  const server = await createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
   await new Promise(resolve => server.listen(socketPath, resolve));
   t.after(async () => { delete process.env.COACH_RUNNER_FIXTURE_MODE; await new Promise(resolve => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
   function send(data) { const body = JSON.stringify(data); return new Promise((resolve, reject) => { const req = http.request({ socketPath, path:'/v1/job', method:'POST', headers:signed(body) }, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); }); req.on('error', reject); req.end(body); }); }
@@ -46,6 +46,8 @@ test('runner bounds concurrent jobs, kills timed-out workers and recovers capaci
   const first = send({ ...job, timeoutMs: 500 });
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(await send(job), 503);
+  assert.equal(await send({ ...job, operation: 'check' }), 200, 'status works while execution is busy');
+  assert.equal(await send({ ...job, operation: 'check' }), 200, 'cached status does not spawn another job');
   assert.equal(await first, 502);
   delete process.env.COACH_RUNNER_FIXTURE_MODE;
   assert.equal(await send(job), 200);
@@ -54,7 +56,7 @@ test('runner bounds concurrent jobs, kills timed-out workers and recovers capaci
 test('client disconnect kills worker and releases scratch/capacity', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-disconnect-'));
   const socketPath = path.join(dir, 'runner.sock');
-  const server = createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
+  const server = await createRunner({ publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), jobRoot: dir });
   await new Promise(resolve => server.listen(socketPath, resolve));
   t.after(async () => { delete process.env.COACH_RUNNER_FIXTURE_MODE; await new Promise(resolve => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
   process.env.COACH_RUNNER_FIXTURE_MODE = 'timeout';
@@ -68,7 +70,7 @@ test('client disconnect kills worker and releases scratch/capacity', async t => 
 test('shutdown awaits active worker termination and scratch cleanup', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-shutdown-'));
   const socketPath = path.join(dir, 'runner.sock');
-  const server = createRunner({publicKey:keys.publicKey.export({type:'spki',format:'pem'}),jobRoot:dir});
+  const server = await createRunner({publicKey:keys.publicKey.export({type:'spki',format:'pem'}),jobRoot:dir});
   await new Promise(resolve => server.listen(socketPath, resolve));
   t.after(() => { delete process.env.COACH_RUNNER_FIXTURE_MODE; fs.rmSync(dir,{recursive:true,force:true}); });
   process.env.COACH_RUNNER_FIXTURE_MODE='timeout';
