@@ -1,6 +1,7 @@
 /* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
    No framework, JSON-file storage, signed session cookies.               */
 import http from 'node:http';
+import { readJson, validateDb, validateState, StorageError } from './storage-read.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,8 +96,11 @@ if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(
 const SECRET = fs.readFileSync(secretFile, 'utf8').trim();
 
 const dbFile = path.join(DATA, 'db.json');
-let db = { users: [], creds: [], subs: [], invites: [] };
-try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}
+const db = readJson(dbFile, validateDb, { users: [], creds: [], subs: [], invites: [] });
+// Validate every existing profile before accepting requests or starting background writes.
+for (const name of fs.readdirSync(DATA)) {
+  if (/^state-[a-zA-Z0-9_-]+\.json$/.test(name)) readJson(path.join(DATA, name), validateState);
+}
 db.subs = db.subs || [];
 db.invites = db.invites || [];
 db.deviceLinks = db.deviceLinks || [];   // unused one-time device links, hashed (device-link.js)
@@ -123,7 +127,7 @@ function notePull(user, now = Date.now()) {
 // The later of the last push and the last pull.
 const lastSyncOf = (u, S) => Math.max(S?._ts || 0, u?.lastPull || 0) || null;
 function readState(uid) {
-  try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
+  return readJson(stateFile(uid), validateState);
 }
 // An entry is an object a reader can dereference, and `records` is every entry of a stored
 // list. PUT /api/data drops the rest on the way in — a null workout, a routine that is a
@@ -375,7 +379,11 @@ const STATE_CACHE_TTL_MS = Math.max(50, +(process.env.STATE_CACHE_TTL_MS || 6000
 const stateCache = new Map(); // uid -> { mtimeMs, size, hitAt, S }
 function readStateCached(uid) {
   let st;
-  try { st = fs.statSync(stateFile(uid)); } catch { stateCache.delete(uid); return null; }
+  try { st = fs.statSync(stateFile(uid)); } catch (e) {
+    stateCache.delete(uid);
+    if (e.code === 'ENOENT') return readState(uid); // distinguishes dangling symlinks
+    throw new StorageError(stateFile(uid), new Error(`stat failed (${e.code || 'unknown'})`));
+  }
   const now = Date.now();
   for (const [k, v] of stateCache) if (now - v.hitAt > STATE_CACHE_TTL_MS) stateCache.delete(k);
   const hit = stateCache.get(uid);
@@ -2024,7 +2032,7 @@ const routes = {
     // `_rev` set on it is dropped by JSON.stringify, so the file would read back as rev 0 while
     // the response claimed the next revision.
     const list = v => v == null || Array.isArray(v);
-    if (Array.isArray(body.state) || !list(body.state.workouts) || !list(body.state.routines)) return json(res, 400, { error: 'invalid state' });
+    if (Array.isArray(body.state) || !['workouts', 'routines', 'bodyweight', 'customEx'].every(k => list(body.state[k]))) return json(res, 400, { error: 'invalid state' });
     // The same readers walk every entry (`w.d`, `w.name`). They skip what is not an entry now
     // (`records` above), but nothing should be storing one. Dropped, not refused:
     // such an entry carries nothing worth keeping, whereas a 400 would strand a client whose own

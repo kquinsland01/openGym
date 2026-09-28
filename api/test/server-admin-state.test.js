@@ -68,7 +68,6 @@ const DOCS = {
   'a null body-weight entry': { workouts: [okW], routines: [okR], bodyweight: [null, okB], unit: 'kg' },
   'shapeless body-weight entries': { workouts: [okW], routines: [okR], bodyweight: ['x', 7, [], okB], unit: 'kg' },
   'a null customEx entry': { workouts: [okW], routines: [okR], bodyweight: [okB], customEx: [null], unit: 'kg' },
-  'lists that are objects, not arrays': { workouts: { a: 1 }, routines: { a: 1 }, bodyweight: { a: 1 }, unit: 'kg' },
   'lists that are null': { workouts: null, routines: null, bodyweight: null, unit: 'kg' },
   'no lists at all': { unit: 'kg' }
 };
