@@ -98,12 +98,19 @@ async function startServer(t, { env = {}, users = [], creds = [], deviceLinks } 
   child.stderr.on('data', d => h.log += d);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(dataDir, { recursive: true, force: true }); });
   h.api = `http://127.0.0.1:${await boundPort(child, () => h.log)}`;
-  h.req = async (method, p, { body, cookie, ip = '198.51.100.1', headers = {} } = {}) => {
+  const ceremonyCookies = new Map();
+  h.req = async (method, p, { body, cookie, ip = '198.51.100.1', headers = {}, binding = true } = {}) => {
+    const ceremony = binding && ceremonyCookies.get(body?.cid);
+    const cookies = [cookie, ceremony].filter(Boolean).join('; ');
     const r = await fetch(`${h.api}${p}`, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin', 'X-Forwarded-For': ip, ...(cookie ? { Cookie: cookie } : {}), ...headers },
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin', 'X-Forwarded-For': ip, ...(cookies ? { Cookie: cookies } : {}), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
+    for (const c of r.headers.getSetCookie()) {
+      const m = /^gymceremony-([^=]+)=([^;]+)/.exec(c);
+      if (m) ceremonyCookies.set(m[1], c.split(';')[0]);
+    }
     const setCookie = r.headers.getSetCookie().find(c => c.startsWith('gymsid=') && !c.startsWith('gymsid=;'));
     return { status: r.status, body: await r.json(), headers: r.headers, cookie: setCookie ? setCookie.split(';')[0] : null };
   };
@@ -755,4 +762,86 @@ test('a Settings or device-link challenge never finishes a sign-up, a sign-in or
   assert.equal(made.body.user.name, 'Cleo');
   assert.ok(made.cookie);
   assert.equal(h.db().users.length, 2);
+});
+
+test('cookie-setting ceremonies reject untrusted browser origins, including Bearer requests', async t => {
+  const h = await startServer(t);
+  const routes = ['/api/login/options', '/api/login/verify', '/api/register/options', '/api/register/verify'];
+  for (const route of routes) {
+    for (const headers of [
+      { Origin: 'https://untrusted.example' },
+      { 'Sec-Fetch-Site': 'cross-site', Origin: ORIGIN },
+      { 'Sec-Fetch-Site': 'same-site', Origin: ORIGIN },
+      { 'Sec-Fetch-Site': '', Origin: 'null' },
+      { Authorization: 'Bearer unused', Origin: 'https://untrusted.example' }
+    ]) {
+      const r = await h.req('POST', route, { body: { name: 'New profile' }, headers });
+      assert.equal(r.status, 403, route);
+      assert.deepEqual(r.headers.getSetCookie(), []);
+    }
+  }
+  assert.equal((await h.req('POST', '/api/login/options', { body: {}, headers: { Origin: ORIGIN } })).status, 200,
+    'the Vite proxy forwards the configured Origin and same-origin metadata');
+  assert.equal((await h.req('POST', '/api/login/options', { body: {}, headers: { Origin: ORIGIN, 'Sec-Fetch-Site': '' } })).status, 200,
+    'older browsers may omit fetch metadata');
+});
+
+test('login requires the initiating cookie before inspecting credentials, and preserves the live prompt on refusal', async t => {
+  const key = softPasskey();
+  const h = await startServer(t, { users: [user('u1', 'Ana')], creds: [key.row('u1')] });
+  const first = await h.req('POST', '/api/login/options', { body: {} });
+  const second = await h.req('POST', '/api/login/options', { body: {} });
+  const body = { cid: first.body.cid }; // No assertion needed to test the binding guard.
+  const otherCookie = second.headers.getSetCookie().find(c => c.startsWith('gymceremony-')).split(';')[0];
+  for (const headers of [{}, { Cookie: otherCookie }, { Cookie: `gymceremony-${body.cid}=incorrect` }]) {
+    const r = await h.req('POST', '/api/login/verify', { body, binding: false, headers });
+    assert.equal(r.status, 403);
+    assert.equal(r.cookie, null);
+  }
+  const good = await h.req('POST', '/api/login/verify', { body: {
+    cid: first.body.cid, credential: key.assertion(first.body.options.challenge)
+  } });
+  assert.equal(good.status, 200);
+  assert.equal(good.body.user.id, 'u1');
+  assert.ok(good.headers.getSetCookie().some(c => c.startsWith(`gymceremony-${body.cid}=; Max-Age=0`)));
+  assert.ok(good.cookie);
+  // A second tab's prompt remains valid after the first has signed in and cleared its cookie.
+  const next = await h.req('POST', '/api/login/verify', { body: {
+    cid: second.body.cid, credential: key.assertion(second.body.options.challenge)
+  } });
+  assert.equal(next.status, 200);
+  const replay = await h.req('POST', '/api/login/verify', { body: { cid: first.body.cid } });
+  assert.equal(replay.status, 400);
+});
+
+test('registration requires its own browser cookie and succeeds once with the normal client flow', async t => {
+  const h = await startServer(t);
+  const key = softPasskey();
+  const start = await h.req('POST', '/api/register/options', { body: { name: 'New profile' } });
+  assert.equal(start.status, 200);
+  for (const headers of [{}, { Cookie: `gymceremony-${start.body.cid}=incorrect` }]) {
+    const r = await h.req('POST', '/api/register/verify', { body: { cid: start.body.cid }, binding: false, headers });
+    assert.equal(r.status, 403);
+    assert.equal(r.cookie, null);
+    assert.equal(h.db().users.length, 0);
+  }
+  const registered = await h.req('POST', '/api/register/verify', { body: {
+    cid: start.body.cid, credential: key.attestation(start.body.options.challenge)
+  } });
+  assert.equal(registered.status, 200);
+  assert.equal(registered.body.user.name, 'New profile');
+  assert.equal(h.db().users.length, 1);
+  assert.ok(registered.headers.getSetCookie().some(c => c.includes('Max-Age=0')));
+});
+
+test('native pairing still redeems from a separate origin without ceremony cookies', async t => {
+  const h = await startServer(t, { users: [user('u1', 'Ana')] });
+  const created = await h.req('POST', '/api/pair/create', { body: {}, cookie: mintSession('u1') });
+  assert.equal(created.status, 200);
+  const redeemed = await h.req('POST', '/api/pair/redeem', { body: { code: created.body.code }, binding: false,
+    headers: { Origin: 'https://localhost', 'Sec-Fetch-Site': 'cross-site' } });
+  assert.equal(redeemed.status, 200);
+  assert.equal(redeemed.body.user.id, 'u1');
+  assert.ok(redeemed.body.token);
+  assert.deepEqual(redeemed.headers.getSetCookie(), []);
 });

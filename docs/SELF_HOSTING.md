@@ -367,6 +367,15 @@ were issued; lowering it never cuts an existing session short. A browser renews 
 signing in; a paired phone renews its token by itself whenever it starts past half of that
 time, so only a phone left unopened for longer than `SESSION_DAYS` has to be paired again.
 
+Passkey sign-in and registration need cookies between their options and verification requests.
+Each prompt sets an HttpOnly, `SameSite=Strict` ceremony cookie for five minutes and clears it
+when verification consumes the challenge. HTTPS uses a `Secure`, `__Host-` prefixed cookie.
+Parallel tabs receive separate bindings. Reverse proxies must preserve `Set-Cookie`, `Cookie`,
+`Origin` and `Sec-Fetch-Site`; configure `ORIGIN` to match the public app URL. The supplied Vite
+proxy already forwards the configured `API_ORIGIN` for local development. Non-browser clients
+performing these cookie-based flows must keep their cookie jar. Native mobile pairing continues
+to use its one-shot code and Bearer token without ceremony cookies.
+
 The web image renders its nginx config from these when the container starts, so they take effect
 on a **prebuilt image** — no rebuild. `BACKEND` and `PORT` together are what `/api` is proxied to,
 so they have to name a service the web container can actually reach on your compose network.

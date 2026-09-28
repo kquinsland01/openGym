@@ -239,17 +239,22 @@ Read this before hosting openGym for anyone other than yourself.
   was issued with, so changing the setting doesn't reach cookies that are already out. Deleting
   `./data/secret` and restarting still works as the instance-wide reset, and disabling an account
   still locks out one user completely.
-- **CSRF protection is `SameSite=Lax` plus an origin check, not tokens.** There are no CSRF
-  tokens. `SameSite=Lax` alone was not enough: it keeps the cookie off a cross-*site* request but
+- **CSRF protection checks browser origins and binds passkey ceremonies to their browser.**
+  `SameSite=Lax` alone was not enough: it keeps the cookie off a cross-*site* request but
   a sibling subdomain (`gym.example.com` vs anything else under `example.com` — one domain, one
   reverse proxy, several apps, i.e. the usual self-hosting layout) is the *same* site and does
   get the cookie. So every state-changing request that a browser sent must also be
   `Sec-Fetch-Site: same-origin`, or carry an `Origin` equal to `ORIGIN` where that header is
   missing (`api/server.js:344`). Requests authenticated with a Bearer token skip the check —
-  a browser never attaches one by itself, so there is no ambient authority to borrow — as do the
-  register/login/pair handshakes, which carry their own credential in the body and act on no
-  existing session (`api/server.js:338`). The device-code routes are not exempt: a code is
-  redeemed on the app's own origin, the only one a passkey for it can be created on.
+  a browser never attaches one by itself, so there is no ambient authority to borrow — as does
+  native pairing, which carries a one-shot code and returns a Bearer token. Passkey
+  registration and login options/verification check Origin and Fetch Metadata even when an
+  Authorization header is supplied. Their verification also requires the short-lived HttpOnly
+  cookie issued to the initiating browser with that specific challenge. On HTTPS this is a
+  `__Host-` cookie, with `Secure`, `SameSite=Strict`, and `Path=/`. Two tabs can complete separate
+  prompts without overwriting each other's binding. A wrong or missing binding is refused before
+  cryptographic verification and does not consume the legitimate browser's challenge. The
+  device-code routes are not exempt: a code is redeemed on the app's own origin, the only one a passkey for it can be created on.
 - **User verification is preferred, not required.** Both handshakes pass
   `requireUserVerification: false` (`api/server.js:575`, `api/server.js:644`), so a passkey
   released without a biometric or PIN is still accepted. In practice: unlocked device ≈ account

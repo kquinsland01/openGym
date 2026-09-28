@@ -85,12 +85,19 @@ async function startServer(t, { env = {}, users = [], creds = [], invites = [] }
   // readiness signal — see boundPort in helpers.mjs for why the test does not pick one.
   h.api = `http://127.0.0.1:${await boundPort(child, () => h.log)}`;
   // Every request looks like the app talking to its own backend unless a test says otherwise.
-  h.req = async (method, p, { body, cookie, ip = '198.51.100.1', headers = {} } = {}) => {
+  const ceremonyCookies = new Map();
+  h.req = async (method, p, { body, cookie, ip = '198.51.100.1', headers = {}, binding = true } = {}) => {
+    const ceremony = binding && ceremonyCookies.get(body?.cid);
+    const cookies = [cookie, ceremony].filter(Boolean).join('; ');
     const r = await fetch(`${h.api}${p}`, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin', 'X-Forwarded-For': ip, ...(cookie ? { Cookie: cookie } : {}), ...headers },
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin', 'X-Forwarded-For': ip, ...(cookies ? { Cookie: cookies } : {}), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
+    for (const c of r.headers.getSetCookie()) {
+      const m = /^gymceremony-([^=]+)=([^;]+)/.exec(c);
+      if (m) ceremonyCookies.set(m[1], c.split(';')[0]);
+    }
     const setCookie = r.headers.getSetCookie().find(c => c.startsWith('gymsid=') && !c.startsWith('gymsid=;'));
     return { status: r.status, body: await r.json(), headers: r.headers, cookie: setCookie ? setCookie.split(';')[0] : null };
   };

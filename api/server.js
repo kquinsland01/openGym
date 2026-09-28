@@ -26,6 +26,7 @@ import {
   normalizeEmail, maskEmail
 } from './password.js';
 import { createBackoff, createWindow } from './rate-limit.js';
+import { createBrowserAuth, browserAuthOriginOk } from './browser-auth.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS
 } from './passkeys-store.js';
@@ -531,22 +532,18 @@ const clearCookie = COOKIE === LEGACY_COOKIE
 // Content-Type claims, so a hostile page could reach the state-changing routes with a form-style
 // POST that needs no CORS preflight at all.
 //
-// So a state-changing request that came from a browser has to come from ORIGIN. The exemptions
-// below are not holes: each of those routes carries its own credential in the body (a WebAuthn
-// challenge id, a one-shot pairing code), none of them acts on the caller's existing session, and
-// they have to keep working from the mobile WebView, whose origin is never ORIGIN.
-//
-// The password routes are deliberately NOT here. A name and a password are a credential too,
-// but one a hostile page can know — its own — so an exempt POST /api/login/password would let
-// any site sign a visitor into the attacker's account and collect what they log (login CSRF).
-const CSRF_EXEMPT = new Set([
+// Cookie-setting passkey options and verification require the browser-origin check as well as
+// their WebAuthn proof. Verification also requires the HttpOnly cookie issued with its options.
+// The paired mobile app uses a one-shot code and receives a Bearer token, not a session cookie.
+const CSRF_EXEMPT = new Set(['POST /api/pair/redeem']);
+const BROWSER_AUTH = new Set([
   'POST /api/register/options', 'POST /api/register/verify',
-  'POST /api/login/options', 'POST /api/login/verify',
-  'POST /api/pair/redeem'
+  'POST /api/login/options', 'POST /api/login/verify'
 ]);
 const originsMatch = (a, b) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 function csrfOk(req, key) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return true;
+  if (BROWSER_AUTH.has(key)) return browserAuthOriginOk(req, ORIGIN);
   if (CSRF_EXEMPT.has(key)) return true;
   // The paired mobile app authenticates with a Bearer token. A browser never attaches one on its
   // own, so there is no ambient authority for a hostile page to borrow and no origin to check.
@@ -589,6 +586,20 @@ function takeChallenge(cid) {
 }
 setInterval(() => { for (const [k, v] of challenges) if (v.exp < Date.now()) challenges.delete(k); }, 60000).unref();
 
+// The cookie is specific to the challenge and is never returned in JSON. The browser that
+// receives a session must have received the corresponding options cookie first. Wrong bindings
+// do not consume a legitimate browser's live prompt; successful consumption clears its cookie.
+const browserAuth = createBrowserAuth({ origin: ORIGIN, secret: SECRET });
+function takeBrowserChallenge(req, res, cid, kind) {
+  const c = challenges.get(cid);
+  if (!c || c.kind !== kind || c.exp < Date.now()) return takeChallenge(cid);
+  if (!browserAuth.matches(req, cid)) {
+    throw new HttpError(403, 'sign-in must finish in the browser that started it — try again');
+  }
+  res.setHeader('Set-Cookie', browserAuth.clear(cid));
+  return takeChallenge(cid);
+}
+
 // ---------- device pairing (mobile app "connect to my server", no WebAuthn ceremony) ----------
 // A passkey ceremony can't run inside the app's WebView (its origin never matches RP_ID), so the
 // app authenticates by redeeming a short code minted from an already signed-in browser tab —
@@ -607,7 +618,11 @@ setInterval(() => { for (const [k, v] of pairings) if (v.exp < Date.now()) pairi
 /* ---------- helpers ---------- */
 function json(res, code, obj, extraHeaders) {
   const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(extraHeaders || {}) });
+  // Verification may already have cleared its ceremony cookie; keep that deletion alongside
+  // the freshly issued session cookies. Headers set by unrelated routes retain their behavior.
+  res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(extraHeaders || {}),
+    ...(extraHeaders?.['Set-Cookie'] && res.getHeader('Set-Cookie')
+      ? { 'Set-Cookie': [...[].concat(res.getHeader('Set-Cookie')), ...[].concat(extraHeaders['Set-Cookie'])] } : {}) });
   res.end(body);
 }
 // A request the caller got wrong. The catch-all at the bottom answers it with this status and
@@ -1798,12 +1813,12 @@ const routes = {
       excludeCredentials: []
     });
     const cid = putChallenge({ kind: 'register', challenge: options.challenge, name, uid, code });
-    json(res, 200, { cid, options });
+    json(res, 200, { cid, options }, { 'Set-Cookie': browserAuth.issue(cid) });
   },
 
   'POST /api/register/verify': async (req, res) => {
     const body = await readBody(req);
-    const c = takeChallenge(body.cid);
+    const c = takeBrowserChallenge(req, res, body.cid, 'register');
     if (!c || c.kind !== 'register' || !c.uid) {
       audit(req, 'auth.register.fail', { ok: false, msg: 'challenge-expired' });
       return json(res, 400, { error: 'challenge expired — try again' });
@@ -1861,12 +1876,12 @@ const routes = {
       rpID: RP_ID, userVerification: 'preferred', allowCredentials: []
     });
     const cid = putChallenge({ kind: 'login', challenge: options.challenge });
-    json(res, 200, { cid, options });
+    json(res, 200, { cid, options }, { 'Set-Cookie': browserAuth.issue(cid) });
   },
 
   'POST /api/login/verify': async (req, res) => {
     const body = await readBody(req);
-    const c = takeChallenge(body.cid);
+    const c = takeBrowserChallenge(req, res, body.cid, 'login');
     if (c?.kind !== 'login') {
       audit(req, 'auth.login.fail', { ok: false, msg: 'challenge-expired' });
       return json(res, 400, { error: 'challenge expired — try again' });
