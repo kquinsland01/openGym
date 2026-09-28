@@ -187,7 +187,7 @@ export function coachRoutes({ json, readBody, readSession, requireAdmin }) {
         // from the card rather than from a user reporting that nothing happens. An HTTPS
         // provider has no process to drop, and the card must not show a red banner for it.
         unprivileged: adapter?.spawns === false
-          ? { ok: true, dropped: false, why: 'this provider runs no child process' }
+          ? { ok: true, dropped: false, why: adapter?.remote ? 'provider runs in the isolated Coach runner' : 'this provider runs no child process' }
           : canDropPrivileges(),
         // Counts and outcomes only — never intake answers, payloads or proposals (FR-12/A4).
         // The same counter the instance cap reads, so the card and the cap cannot disagree.

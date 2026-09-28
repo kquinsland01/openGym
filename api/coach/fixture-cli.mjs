@@ -22,7 +22,11 @@ const read = () => new Promise(resolve => {
 
 const prompt = await read();
 
-if (MODE === 'timeout') { await new Promise(() => {}); }          // never resolves — the runner kills us
+if (MODE === 'timeout') { setInterval(() => {}, 1000); await new Promise(() => {}); }          // never resolves — the runner kills us
+if (MODE === 'isolation') {
+  const fs = await import('node:fs');
+  out({ coach_contract: 1, ok: true, dataAbsent: !fs.existsSync('/data'), signingKeyAbsent: !fs.existsSync('/run/coach-signing/private.pem'), uid: process.getuid?.(), homeIsJob: process.env.HOME === process.cwd(), credentialAbsent: !process.env.COACH_RUNNER_KEY_FILE });
+}
 if (MODE === 'crash') { process.stderr.write('fixture: simulated crash\n'); process.exit(3); }
 if (MODE === 'invalid') { process.stdout.write('I am afraid I cannot do that.\n'); process.exit(0); }
 

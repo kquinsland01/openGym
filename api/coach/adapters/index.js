@@ -12,6 +12,7 @@
  * codebase — routes, jobs, payload, validation, UI — knows which one is configured.
  */
 import { run } from './spawn.js';
+import { runnerConfigured, remoteAdapter } from './remote.js';
 import claude from './claude.js';
 import codex from './codex.js';
 import anthropic from '../core/adapters/anthropic.js';
@@ -46,5 +47,6 @@ const fixture = {
    isConnected() keeps the Coach out of /api/config entirely. Codex is here too, and unlike
    the SDK its runtime is a CLI binary, so its absence shows up as a spawn error from check(). */
 const ADAPTERS = { fixture, claude, codex, anthropic, openai, gemini, compatible };
-export const adapterFor = provider => ADAPTERS[provider] || null;
+export const localAdapterFor = provider => ADAPTERS[provider] || null;
+export const adapterFor = provider => runnerConfigured() && ['fixture', 'claude', 'codex'].includes(provider) ? remoteAdapter(provider) : localAdapterFor(provider);
 export default ADAPTERS;

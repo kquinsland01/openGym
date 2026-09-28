@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opengym
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: COACH_RUNNER_SOCKET
+              value: /run/coach/runner.sock
+            - name: COACH_RUNNER_KEY_FILE
+              value: /run/coach-signing/private.pem
+          volumeMounts:
+            - name: coach-socket
+              mountPath: /run/coach
+            - name: coach-signing
+              mountPath: /run/coach-signing
+              readOnly: true
+        - name: coach-runner
+          # Build api/Dockerfile --target runner from the same commit; pin its digest.
+          image: ghcr.io/kquinsland01/opengym-runner:edge
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1100
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: COACH_RUNNER_SOCKET
+              value: /run/coach/runner.sock
+          volumeMounts:
+            - name: coach-socket
+              mountPath: /run/coach
+            - name: coach-verification
+              mountPath: /run/coach-verification
+              readOnly: true
+            - name: coach-tmp
+              mountPath: /tmp
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "const r=require('http').get({socketPath:'/run/coach/runner.sock',path:'/v1/job'},s=>{s.resume();s.on('end',()=>process.exit(s.statusCode===401?0:1))});r.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000).unref()"
+            timeoutSeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "const r=require('http').get({socketPath:'/run/coach/runner.sock',path:'/v1/job'},s=>{s.resume();s.on('end',()=>process.exit(s.statusCode===401?0:1))});r.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000).unref()"
+            timeoutSeconds: 3
+            periodSeconds: 30
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: '1'
+              memory: 1Gi
+      volumes:
+        - name: coach-socket
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: coach-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+        - name: coach-signing
+          secret:
+            secretName: opengym-coach-signing
+            defaultMode: 0440
+        - name: coach-verification
+          configMap:
+            name: opengym-coach-verification

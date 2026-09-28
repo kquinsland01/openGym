@@ -16,6 +16,13 @@ spec:
       labels:
         app: opengym
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
         # The exercise images and GIFs, one time (~140 MB) — the same download as the media
         # service in docker-compose.yml. They are © Gym visual (https://gymvisual.com/), used
@@ -23,6 +30,13 @@ spec:
         # openGym; see NOTICE.md.
         - name: media-download
           image: alpine/git:2.52.0
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -34,6 +48,8 @@ spec:
           volumeMounts:
             - name: opengym-media
               mountPath: /out
+            - name: init-tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 128Mi
@@ -41,12 +57,18 @@ spec:
               memory: 256Mi
       containers:
         - name: api
-          # Pin both images to one release and move them together: a tag names what you run and
-          # what you roll back to, where :latest changes under a pod whenever it is rescheduled.
-          # The API and the web image of one version belong together. The published tags are
-          # the version (1.3.9) and its minor line (1.3); see the release notes before a bump.
-          image: ghcr.io/duartesantos8/opengym-api:1.3.9
+          # Both images must come from the same hardened commit. Pin verified digests
+          # before production use; upstream 1.3.9 lacks this startup configuration.
+          # Build/publish this branch before applying; see the hardening runbook.
+          image: ghcr.io/kquinsland01/opengym-api:edge
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           env:
             - name: PORT
               value: "3000"
@@ -79,17 +101,26 @@ spec:
           volumeMounts:
             - name: opengym-data
               mountPath: /data
+            - name: api-tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 128Mi
             limits:
               memory: 512Mi
         - name: web
-          image: ghcr.io/duartesantos8/opengym-web:1.3.9   # same version as the api container
+          image: ghcr.io/kquinsland01/opengym-web:edge   # build from the same commit as api
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           env:
             - name: NGINX_PORT
-              value: "80"
+              value: "8080"
             # Both containers share the pod's network, so the API is on localhost. An IP here
             # also means nginx never needs RESOLVER (Docker's DNS by default) to find it.
             - name: BACKEND
@@ -97,31 +128,44 @@ spec:
             - name: PORT
               value: "3000"
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: web
               protocol: TCP
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 30
           volumeMounts:
             - name: opengym-media
               mountPath: /usr/share/nginx/html/img
               subPath: img
+              readOnly: true
             - name: opengym-media
               mountPath: /usr/share/nginx/html/gif
               subPath: gif
+              readOnly: true
+            - name: web-tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: 32Mi
             limits:
               memory: 128Mi
       volumes:
+        - name: init-tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: api-tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: web-tmp
+          emptyDir:
+            sizeLimit: 128Mi
         - name: opengym-data
           persistentVolumeClaim:
             claimName: opengym-data

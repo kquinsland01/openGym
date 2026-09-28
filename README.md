@@ -116,6 +116,14 @@ as a home-screen app, passkey sign-in, offline support, sync across your phone a
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose.
 
+For a fresh source build of this hardened branch, prepare its data bind mount before
+`docker compose up --build`: `sudo install -d -m 0700 -o 1000 -g 1000 data` after cloning.
+The API now runs as UID/GID 1000. Existing installations need an offline ownership migration;
+rootless engines need their UID mapping procedure. Follow the
+[volume preparation instructions](docs/SELF_HOSTING.md#1-run-it-locally-5-minutes) before upgrading, and build
+matching API/web images: older published images do not include this branch's hardening.
+The web container listens on port 8080 internally; the default host port remains 8080.
+
 ```bash
 git clone https://github.com/DuarteSantos8/openGym
 cd openGym
@@ -197,7 +205,7 @@ All via `.env` (see `.env.example`):
 | `RP_ID`       | Hostname passkeys are bound to                       | `localhost`             |
 | `ORIGIN`      | Full URL the app is served from                      | `http://localhost:8080` |
 | `WEB_PORT`    | Host port for the web UI                             | `8080`                  |
-| `NGINX_PORT`  | Port the web container listens on, inside the container | `80`                 |
+| `NGINX_PORT`  | Port the web container listens on, inside the container | `8080`                 |
 | `BACKEND`     | Name of the API service that `/api` is proxied to — change it if yours isn't called `api` | `api` |
 | `PORT`        | Port the API listens on; the web container proxies to the same value | `3000`  |
 | `RP_NAME`     | Name shown in the passkey prompt                     | `openGym`               |
