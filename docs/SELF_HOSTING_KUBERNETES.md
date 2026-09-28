@@ -51,3 +51,12 @@ Notes:
   overwrites whatever a client sent; pass that through with `CF_CONNECTING_IP` on the `web`
   container (as `.env.example` describes for Cloudflare), turn on `TRUST_PROXY=1` on the `api`
   container, and add a NetworkPolicy so only the web container's pod reaches port 3000.
+
+### Backup and recovery acceptance
+
+Before production, follow [Backup and recovery](BACKUP_RECOVERY.md): choose and test an
+explicit CSI StorageClass, schedule daily quiesced encrypted off-volume backups, and prove
+restoration into a new isolated volume. Initial RPO/RTO targets are 24 hours/2 hours and
+must be measured for this cluster. The helper refuses a busy writer lock and existing restore
+targets; it does not stop Kubernetes writers for you. Retain the signing/decryption secret
+with the complete data volume and escrow the separate backup-repository credentials.

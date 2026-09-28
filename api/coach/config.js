@@ -25,6 +25,7 @@
    use, and shared by every profile on the instance under the daily caps. */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { atomicWrite } from '../durable-write.js';
 import path from 'node:path';
 import { HTTP_PROVIDERS, baseUrlFor } from './core/providers.js';
 
@@ -127,11 +128,7 @@ export function decrypt(blob) {
 /* ---------- load / save ---------- */
 
 let cache = null;
-function atomicWrite(file, content, mode) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
-  fs.renameSync(tmp, file);
-}
+
 export function load() {
   if (cache) return cache;
   let stored = {};

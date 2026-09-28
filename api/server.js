@@ -3,6 +3,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { atomicWrite, durableMkdir } from './durable-write.js';
 import path from 'node:path';
 import https from 'node:https';
 import dns from 'node:dns';
@@ -74,7 +75,7 @@ const MAX_BODY = 5 * 1024 * 1024;
 // Secure cookies require HTTPS; over plain http://localhost the flag would drop the cookie
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
-fs.mkdirSync(DATA, { recursive: true });
+durableMkdir(DATA, 0o755);
 /* The secrets are locked down file by file rather than by sealing the whole directory.
  *
  * A blanket `chmod 0700` on DATA looks stronger and is worse: ./data is a host bind mount and
@@ -91,7 +92,7 @@ const lock = f => { try { fs.chmodSync(path.join(DATA, f), 0o600); } catch { /* 
 
 /* ---------- secret + db ---------- */
 const secretFile = path.join(DATA, 'secret');
-if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+if (!fs.existsSync(secretFile)) atomicWrite(secretFile, crypto.randomBytes(32).toString('hex'), 0o600);
 const SECRET = fs.readFileSync(secretFile, 'utf8').trim();
 
 const dbFile = path.join(DATA, 'db.json');
@@ -104,11 +105,7 @@ const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(us
 // 0600: db.json holds passkey credential material. It used to be covered by a blanket 0700 on
 // the whole directory; now that the directory stays traversable, the file carries its own mode.
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2), 0o600); }
-function atomicWrite(file, content, mode) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
-  fs.renameSync(tmp, file);
-}
+
 const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 // When a profile last fetched its document (GET /api/data). The document's own `_ts` moves only
 // on a push, so a device that only ever read — a second phone, a profile that trains elsewhere
@@ -140,7 +137,7 @@ const records = v => (Array.isArray(v) ? v.filter(record) : []);
 const vapidFile = path.join(DATA, 'vapid.json');
 let vapid;
 try { vapid = JSON.parse(fs.readFileSync(vapidFile, 'utf8')); }
-catch { vapid = webpush.generateVAPIDKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
+catch { vapid = webpush.generateVAPIDKeys(); atomicWrite(vapidFile, JSON.stringify(vapid), 0o600); }
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || (SECURE ? ORIGIN : 'mailto:admin@localhost');
 webpush.setVapidDetails(VAPID_SUBJECT, vapid.publicKey, vapid.privateKey);
 
