@@ -367,6 +367,18 @@ were issued; lowering it never cuts an existing session short. A browser renews 
 signing in; a paired phone renews its token by itself whenever it starts past half of that
 time, so only a phone left unopened for longer than `SESSION_DAYS` has to be paired again.
 
+Passkey challenges have process-wide admission limits, independent of client IP addresses:
+`AUTH_CHALLENGE_MAX=4096` live or reserved challenges, `AUTH_CHALLENGE_CONCURRENCY=32`
+option generators in flight, and `AUTH_CHALLENGE_PER_MINUTE=600` issuance credits. The last
+budget starts full and replenishes continuously over a minute; consuming a challenge does not
+refund a credit. All passkey ceremonies share these limits. Challenges expire after five minutes;
+full capacity returns HTTP 503 with `Retry-After` and leaves existing prompts valid. Invalid,
+zero, or excessive values fall back to defaults (maximum accepted values: 100000, 256 and
+10000 respectively). These are API environment variables, not frontend build settings.
+Keep one API writer and add gateway request/concurrency limits appropriate to the pod's measured
+capacity. The in-process bounds constrain retained challenges and option generation; they do not
+replace edge protection or guarantee sign-in availability during sustained abuse.
+
 The web image renders its nginx config from these when the container starts, so they take effect
 on a **prebuilt image** — no rebuild. `BACKEND` and `PORT` together are what `/api` is proxied to,
 so they have to name a service the web container can actually reach on your compose network.
