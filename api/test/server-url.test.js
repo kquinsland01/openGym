@@ -52,7 +52,7 @@ test('an unparseable request target is a 400, and the server keeps answering aft
     assert.match(res, /^HTTP\/1\.1 400 /, `${target} ->\n${res || '(no response)'}\n${h.log}`);
   }
   // a normal target still parses and still routes
-  assert.match(await rawGet(h.port, '/api/health'), /^HTTP\/1\.1 200 /);
-  assert.equal((await fetch(`${h.api}/api/health`)).status, 200);
+  assert.match(await rawGet(h.port, '/api/healthz'), /^HTTP\/1\.1 200 /);
+  assert.equal((await fetch(`${h.api}/api/healthz`)).status, 200);
   assert.equal(h.child.exitCode, null, `server exited:\n${h.log}`);
 });

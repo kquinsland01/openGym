@@ -1,9 +1,47 @@
+# Suppress successful dedicated probes only. Failures and all application requests
+# retain the usual access log; do not key suppression on a spoofable User-Agent.
+map "$uri:$status" $opengym_access_log {
+    default 1;
+    ~^/(healthz|readyz):2[0-9][0-9]$ 0;
+    ~^${BASE_PATH}/api/(healthz|readyz):2[0-9][0-9]$ 0;
+}
+
 # openGym — standalone web server: serves the static app AND proxies /api to the backend,
 # so the whole app lives on ONE origin (required for WebAuthn / passkeys).
 server {
     listen ${NGINX_PORT};
     root /usr/share/nginx/html;
     index index.html;
+    access_log /dev/stdout combined if=$opengym_access_log;
+
+    # Root-relative operational endpoints, independent of BASE_PATH. Liveness stays
+    # local so an API/storage outage does not restart otherwise healthy nginx.
+    location = /healthz {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 200 '{"ok":true}';
+    }
+    location = /__opengym_probe_shell {
+        internal;
+        alias /usr/share/nginx/html/index.html;
+    }
+    location = /readyz {
+        # The auth subrequest opens the shell as nginx's worker UID. A mere -f test
+        # misses an unreadable shell. The subrequest body never reaches the client.
+        auth_request /__opengym_probe_shell;
+        resolver ${RESOLVER} valid=10s ipv6=off;
+        resolver_timeout 1s;
+        set $readiness_upstream http://${BACKEND}:${PORT};
+        proxy_pass $readiness_upstream/api/readyz;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 2s;
+        proxy_send_timeout 2s;
+        proxy_set_header Host $host;
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        add_header Cache-Control "no-store" always;
+    }
+
 
     # Sent on every response below. NOTE: an `add_header` inside a location replaces the whole
     # inherited set rather than adding to it, so the two locations further down that set their

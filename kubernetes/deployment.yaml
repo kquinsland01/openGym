@@ -41,11 +41,10 @@ spec:
               memory: 256Mi
       containers:
         - name: api
-          # Pin both images to one release and move them together: a tag names what you run and
-          # what you roll back to, where :latest changes under a pod whenever it is rescheduled.
-          # The API and the web image of one version belong together. The published tags are
-          # the version (1.3.9) and its minor line (1.3); see the release notes before a bump.
-          image: ghcr.io/duartesantos8/opengym-api:1.3.9
+          # Build and publish BOTH images from this change first: upstream 1.3.9 lacks
+          # these probe endpoints. Replace review tags with verified immutable digests
+          # before applying; the tags below are not a promise that images are published.
+          image: ghcr.io/kquinsland01/opengym-api:edge
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT
@@ -67,15 +66,29 @@ spec:
             - containerPort: 3000
               name: http
               protocol: TCP
+          # Startup/liveness check only the process. PVC faults remove traffic but
+          # never trigger repeated restarts of a healthy process.
+          startupProbe:
+            httpGet:
+              path: /api/healthz
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/readyz
               port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 1
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/healthz
               port: 3000
-            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           volumeMounts:
             - name: opengym-data
               mountPath: /data
@@ -85,7 +98,7 @@ spec:
             limits:
               memory: 512Mi
         - name: web
-          image: ghcr.io/duartesantos8/opengym-web:1.3.9   # same version as the api container
+          image: ghcr.io/kquinsland01/opengym-web:edge   # same version as the api container
           imagePullPolicy: IfNotPresent
           env:
             - name: NGINX_PORT
@@ -100,15 +113,27 @@ spec:
             - containerPort: 80
               name: web
               protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: 80
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 1
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: 80
-            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           volumeMounts:
             - name: opengym-media
               mountPath: /usr/share/nginx/html/img

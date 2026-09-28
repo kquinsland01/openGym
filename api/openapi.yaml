@@ -163,22 +163,54 @@ paths:
     get:
       tags: [meta]
       operationId: getHealth
-      summary: Health check
-      description: Always public. Also reports how many user accounts exist.
+      summary: Compatibility readiness check
+      description: Public alias for /api/readyz. No account count is exposed.
       security: []
       responses:
         '200':
-          description: The server is up.
+          description: Startup and the most recent bounded storage check succeeded.
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  ok: { type: boolean, const: true }
-                  users:
-                    type: integer
-                    description: Number of registered user accounts.
-              example: { ok: true, users: 7 }
+              schema: { type: object, properties: { ok: { type: boolean } } }
+              example: { ok: true }
+        '503':
+          description: Storage is unavailable, validation failed, or the initial check is pending.
+
+  /api/healthz:
+    get:
+      tags: [meta]
+      operationId: getLiveness
+      summary: Process liveness
+      description: Public, lightweight event-loop check independent of storage and providers.
+      security: []
+      responses:
+        '200':
+          description: The API process can serve HTTP requests.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, const: true } } }
+              example: { ok: true }
+
+  /api/readyz:
+    get:
+      tags: [meta]
+      operationId: getReadiness
+      summary: Storage-aware readiness
+      description: Public cached readiness; requests do not trigger storage I/O. Responses are not cached.
+      security: []
+      responses:
+        '200':
+          description: Startup validation and the most recent bounded storage check succeeded.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, const: true } } }
+              example: { ok: true }
+        '503':
+          description: Storage is unavailable, validation failed, or the initial check is pending.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean, const: false } } }
+              example: { ok: false }
 
   /api/config:
     get:

@@ -1,3 +1,4 @@
+import { storageWrite } from '../storage-health.js';
 /* Coach instance configuration — the one place that knows whether this instance offers the
    AI Coach at all, which provider drives it, and whose account pays for a job.
 
@@ -128,9 +129,11 @@ export function decrypt(blob) {
 
 let cache = null;
 function atomicWrite(file, content, mode) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
-  fs.renameSync(tmp, file);
+  storageWrite(file, () => {
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
+    fs.renameSync(tmp, file);
+  });
 }
 export function load() {
   if (cache) return cache;

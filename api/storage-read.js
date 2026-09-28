@@ -5,6 +5,8 @@ export class StorageError extends Error {
   constructor(file, cause) {
     super(`Storage integrity failure at ${file}: ${cause.message}. Stop writes and restore a validated backup; do not delete or initialize this file.`, { cause });
     this.name = 'StorageError';
+    this.file = file;
+    this.code = cause.code || 'ESTORAGE';
   }
 }
 
