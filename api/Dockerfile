@@ -1,9 +1,11 @@
-# Two targets from one file.
+# API and optional isolated Coach runner targets from one file.
 #
 #   default (built when no --target is given) — what every instance has always got. No AI
 #           runtime, no AI dependency: `npm ci --omit=optional` skips the Agent SDK and its
 #           platform runtime entirely, so an owner who never wanted the Coach carries none of it.
-#   coach                                     — the same image plus the Claude Agent SDK.
+#   runner       — nonroot isolated worker with Claude SDK and Codex CLI; no API data.
+#   runner-fixture — lightweight worker for isolation tests without external providers.
+#   coach        — legacy privileged-parent API, retained for existing deployments.
 #
 # Build the opt-in one with:  docker build --target coach ./api
 # or through compose with:    API_TARGET=coach docker compose up --build
@@ -43,7 +45,7 @@ RUN apk upgrade --no-cache
 # so in an image without this user *every* job is refused with "no `coach` user exists in this
 # image" — including the fixture provider that exists precisely so the loop can be walked before
 # an account is connected. It costs one line and no bytes worth measuring.
-RUN adduser -D -H -s /sbin/nologin coach
+RUN adduser -D -H -u 1100 -s /sbin/nologin coach
 
 COPY package.json package-lock.json* ./
 # `npm ci` rather than `npm install`: the lockfile is the point of committing one, and the SDK's
@@ -69,15 +71,17 @@ HEALTHCHECK --interval=5m \
 # The opt-in target. Dropping --omit=optional is the whole difference: it pulls in
 # @anthropic-ai/claude-agent-sdk together with the one platform runtime this base needs
 # (linux-*-musl), both pinned by the lockfile.
-FROM base AS coach
+FROM base AS runtime
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Codex ships as a CLI rather than a library, so it is installed rather than resolved, and
 # bubblewrap is its sandbox — a Codex requirement, which is why neither appears in the default
 # target or anywhere in this tree until now.
 RUN apk add --no-cache bubblewrap \
- && npm install -g @openai/codex \
+ && npm install -g @openai/codex@0.158.0 \
  && npm cache clean --force
+
+FROM runtime AS coach
 
 # Where Codex keeps its refreshable login cache. Deliberately a sibling of /data rather than a
 # path inside it: docs/SELF_HOSTING tells owners to back up with `tar czf … data/`, and a live
@@ -85,6 +89,20 @@ RUN apk add --no-cache bubblewrap \
 # by `coach` because the job that writes it has already dropped to that user.
 RUN mkdir -p /coach-auth && chown coach:coach /coach-auth && chmod 700 /coach-auth
 VOLUME ["/coach-auth"]
+
+# Isolated nonroot worker. No /data directory, API process, or persistent auth cache.
+FROM runtime AS runner
+USER 1100:1000
+ENV COACH_RUNNER_SOCKET=/run/coach/runner.sock
+HEALTHCHECK NONE
+CMD ["node", "coach/runner/server.js"]
+
+# Lightweight runner used to exercise the real protocol and process isolation without paid calls.
+FROM base AS runner-fixture
+USER 1100:1000
+ENV COACH_RUNNER_SOCKET=/run/coach/runner.sock
+HEALTHCHECK NONE
+CMD ["node", "coach/runner/server.js"]
 
 # ---------------------------------------------------------------------------------------------
 # Last, so that a plain `docker build ./api` keeps producing the runtime-free image.
@@ -94,3 +112,7 @@ FROM base AS default
 # every vulnerability the image scan ever reported lived — none of them was in a package the
 # app uses. Gone from the published image; the coach target keeps npm for the Codex CLI.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+# The API runs HTTP providers locally and CLI providers through the opt-in isolated runner.
+# Without a runner, local CLI execution still fails closed as nonroot.
+RUN mkdir -p /data && chown node:node /data && chmod 700 /data
+USER 1000:1000

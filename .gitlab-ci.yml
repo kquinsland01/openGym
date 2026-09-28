@@ -478,7 +478,7 @@ build:web-check:
       set -eu
       docker run -d --name web-check -e BACKEND=127.0.0.1 -e PORT=3000 opengym-web:check
       sleep 2
-      docker exec web-check wget -qO- http://127.0.0.1/ | grep -q '<div id="root">'
+      docker exec web-check wget -qO- http://127.0.0.1:8080/ | grep -q '<div id="root">'
       docker exec web-check sh -c 'grep -l "coach" /usr/share/nginx/html/assets/index-*.js >/dev/null'
       docker rm -f web-check
   rules:
@@ -697,22 +697,30 @@ verify:stack:
         api:
           image: "$CI_REGISTRY_IMAGE/api:$IMAGE_TAG"
           pull_policy: always
+          volumes:
+            - ci-api-data:/data
         web:
           image: "$CI_REGISTRY_IMAGE/web:$IMAGE_TAG"
           pull_policy: always
+      volumes:
+        ci-api-data: {}
       EOF
       docker compose -f docker-compose.yml -f ci-images.override.yml config --quiet
+      # A fresh named volume copies /data's UID/GID from the image. A missing host bind
+      # would instead be created root-owned and refuse the hardened API's first write.
+      trap 'docker compose -f docker-compose.yml -f ci-images.override.yml down -v' EXIT
       # --no-deps skips the `media` service (a 140 MB clone the smoke test does not need).
       docker compose -f docker-compose.yml -f ci-images.override.yml up -d --no-deps --no-build api web
+      WEB_PORT="$(docker compose -f docker-compose.yml -f ci-images.override.yml exec -T web printenv NGINX_PORT)"
       NET="$(docker network ls --filter name=opengym --format '{{.Name}}' | head -1)"
       curl() { docker run --rm --network "$NET" curlimages/curl:8.12.1 "$@"; }
       for i in $(seq 1 30); do
-        curl -fsS http://web/api/health >/dev/null 2>&1 && break
+        curl -fsS "http://web:$WEB_PORT/api/health" >/dev/null 2>&1 && break
         sleep 1
       done
-      echo "--- /api/health through nginx";  curl -fsS http://web/api/health | grep -q '"ok":true'
-      echo "--- /api/config through nginx";  curl -fsS http://web/api/config | tee /dev/stderr | grep -q '"invite_only"'
-      echo "--- the app shell";              curl -fsS http://web/ | grep -q '<div id="root">'
+      echo "--- /api/health through nginx";  curl -fsS "http://web:$WEB_PORT/api/health" | grep -q '"ok":true'
+      echo "--- /api/config through nginx";  curl -fsS "http://web:$WEB_PORT/api/config" | tee /dev/stderr | grep -q '"invite_only"'
+      echo "--- the app shell";              curl -fsS "http://web:$WEB_PORT/" | grep -q '<div id="root">'
       echo "--- revision labels"
       for i in api web; do
         docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CI_REGISTRY_IMAGE/$i:$IMAGE_TAG" \

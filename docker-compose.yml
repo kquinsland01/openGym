@@ -77,12 +77,12 @@ services:
       api:
         condition: service_started
     ports:
-      - "${WEB_PORT:-8080}:${NGINX_PORT:-80}"
+      - "${WEB_PORT:-8080}:${NGINX_PORT:-8080}"
     # nginx renders its config at start-up from these (web/nginx.conf.template),
-    # so the API service does not have to be called `api`. Defaults are the old
-    # hardcoded values, so an existing .env and an existing stack are unaffected.
+    # so the API service does not have to be called `api`. Hardened web images use
+    # unprivileged port 8080; migrate any old NGINX_PORT=80 override before upgrading.
     environment:
-      - NGINX_PORT=${NGINX_PORT:-80}
+      - NGINX_PORT=${NGINX_PORT:-8080}
       - BACKEND=${BACKEND:-api}
       - PORT=${PORT:-3000}
       # Docker's embedded DNS. Only ever needs changing on a runtime that is not Docker.

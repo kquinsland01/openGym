@@ -26,7 +26,7 @@ COPY frontend/ ./
 ARG APP_BUILD=""
 RUN APP_BUILD="$APP_BUILD" npm run build
 
-FROM nginx:alpine
+FROM docker.io/library/nginx:alpine
 # Same reason as in api/Dockerfile: alpine fixes land faster than the nginx image is rebuilt.
 RUN apk upgrade --no-cache
 ARG VERSION=dev
@@ -45,11 +45,13 @@ LABEL maintainer="Duarte Santos https://gitlab.com/DuarteSantos8" \
     org.opencontainers.image.created=$BUILD_DATE
 
 COPY web/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY web/nginx.conf /etc/nginx/nginx.conf
+COPY --chmod=755 web/entrypoint.sh /usr/local/bin/opengym-web-entrypoint
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 # exercise media (img/gif) is mounted at runtime from the media volume
 
 # Set Default ENVs for nginx
-ENV NGINX_PORT=80
+ENV NGINX_PORT=8080
 ENV BACKEND=api
 ENV PORT=3000
 # The DNS nginx asks about BACKEND on every /api request. Docker's embedded resolver by
@@ -71,6 +73,11 @@ ENV BASE_PATH=""
 # is the one that refuses a file — raise both together.
 ENV MEDIA_UPLOAD_MAX=48m
 
+USER 101:101
+ENTRYPOINT ["/usr/local/bin/opengym-web-entrypoint"]
+CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080
+
 # Probe the port nginx was actually told to listen on (NGINX_PORT is configurable, so a
 # hardcoded http://localhost/ breaks on any instance that changed it), and address it as
 # 127.0.0.1: envsubst rewrites the conf after the image's IPv6 script, so nginx ends up
@@ -79,4 +86,3 @@ HEALTHCHECK --interval=5m \
             --timeout=5s \
             --retries=3 \
             CMD wget --spider -q "http://127.0.0.1:${NGINX_PORT}/" || exit 1
-

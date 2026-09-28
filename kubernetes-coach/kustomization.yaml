@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fitness
+resources:
+  - ../kubernetes
+patches:
+  - path: runner.yaml
+# Create opengym-coach-signing (private.pem) and opengym-coach-verification
+# (public.pem) out of band; never commit the private key. See the runner runbook.

@@ -7,6 +7,19 @@ This guide takes you from "just cloned it" to "using it from my phone over the i
 
 Requirements: [Docker](https://docs.docker.com/get-docker/) with the Compose plugin.
 
+The hardened default API runs as UID/GID 1000. Before starting a **source build of this
+branch**, create the `./data` bind mount with that ownership (for a fresh directory,
+`sudo install -d -m 0700 -o 1000 -g 1000 data`). For existing data, stop the old API,
+back up and verify the directory, then deliberately migrate its files to UID/GID 1000
+while offline. Rootless engines may map this UID differently; use the engine's ownership
+mapping procedure. Do not make secret files world-readable to work around permissions.
+The server never silently changes ownership on startup. Older published images do not
+contain these changes; build matching API/web images before using the hardened configuration.
+
+nginx now listens on **8080 inside its container** by default as UID/GID 101; the host
+port remains 8080. Update direct container proxy targets and remove old `NGINX_PORT=80`
+overrides, or explicitly select another unprivileged port.
+
 ```bash
 git clone https://github.com/DuarteSantos8/openGym   # or https://gitlab.com/DuarteSantos8/opengym — same repo
 cd openGym
@@ -85,7 +98,7 @@ gym.example.com {
 
 ### Option C — Traefik / nginx / Nginx Proxy Manager
 
-Route `gym.example.com` (HTTPS) → `web:80` (or `<docker-host>:8080`). Any reverse proxy works —
+Route `gym.example.com` (HTTPS) → `web:8080` (or `<docker-host>:8080`). Any reverse proxy works —
 openGym only needs the browser to reach it over `https://gym.example.com`. If that proxy caps
 request bodies (nginx does, at 1 MiB by default), allow at least 5 MiB on `/api/` — the app syncs
 its whole history in one PUT; the bundled web image already allows 5 MiB, matching the API. The
@@ -341,13 +354,13 @@ Running Kubernetes? Example manifests (Deployment, PVCs, Service, Gateway API ro
 `kubernetes/`, described in [SELF_HOSTING_KUBERNETES.md](SELF_HOSTING_KUBERNETES.md).
 
 The defaults assume openGym is the only thing here: a service called `api` on port 3000, and nginx
-on port 80 inside its container. If you are merging this into a compose file that already has an
+on port 8080 inside its container. If you are merging this into a compose file that already has an
 `api`, or you put the web container behind your own reverse proxy on a different port, four
 settings in `.env` move those without editing any config file:
 
 ```bash
 WEB_PORT=8080              # host port — what you browse to
-NGINX_PORT=80              # port the web container listens on, inside the container
+NGINX_PORT=8080              # port the web container listens on, inside the container
 BACKEND=api                # name of the API service that /api is proxied to
 PORT=3000                  # port the API listens on; web proxies to the same value
 RESOLVER=127.0.0.11        # DNS nginx resolves BACKEND with — Docker's, unless you are not on Docker
@@ -388,7 +401,7 @@ and it asks its own address for the API, so everything stays inside the prefix o
 ```caddy
 example.com {
     handle_path /gym/* {
-        reverse_proxy opengym-web:80
+        reverse_proxy opengym-web:8080
     }
 }
 ```
