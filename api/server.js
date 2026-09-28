@@ -26,6 +26,7 @@ import {
   normalizeEmail, maskEmail
 } from './password.js';
 import { createBackoff, createWindow } from './rate-limit.js';
+import { createChallengeStore, challengeLimits, ChallengeBusyError } from './challenges.js';
 import {
   listPasskeys, addPasskeyRecord, renamePasskeyRecord, removePasskeyRecord, passkeyRemovalRefused, MAX_PASSKEYS
 } from './passkeys-store.js';
@@ -575,19 +576,11 @@ function csrfOk(req, key) {
 // POST /api/device-link/options hands to anyone holding a code finished a *sign-up* instead: a
 // passkey on the owner's profile and a session for it, without using the code up, as often as
 // wanted, and past "sign out everywhere".
-const challenges = new Map(); // cid -> {kind, challenge, name?, uid?, exp}
-function putChallenge(data) {
-  const cid = crypto.randomBytes(16).toString('base64url');
-  challenges.set(cid, { ...data, exp: Date.now() + 5 * 60000 });
-  return cid;
-}
-function takeChallenge(cid) {
-  const c = challenges.get(cid);
-  challenges.delete(cid);
-  if (!c || c.exp < Date.now()) return null;
-  return c;
-}
-setInterval(() => { for (const [k, v] of challenges) if (v.exp < Date.now()) challenges.delete(k); }, 60000).unref();
+// Admission reserves capacity before asynchronous option generation. All ceremonies share the
+// same process budget; visitor addresses are deliberately irrelevant behind shared proxies.
+const challenges = createChallengeStore(challengeLimits(process.env));
+const takeChallenge = cid => challenges.take(cid);
+setInterval(() => challenges.sweep(), 60000).unref();
 
 // ---------- device pairing (mobile app "connect to my server", no WebAuthn ceremony) ----------
 // A passkey ceremony can't run inside the app's WebView (its origin never matches RP_ID), so the
@@ -1457,8 +1450,8 @@ const passkeyRoutes = {
     // Awaited: a sign-out everywhere, a disable or an admin reset may have ended this session.
     if (readSession(req) !== user) return notSignedIn(res);
     if (proof === 'passkey') saveDb();   // the confirming passkey's counter and last use
-    const options = await moreOptions(user);
-    const cid = putChallenge({ challenge: options.challenge, uid: user.id, kind: 'add', sv: sessionVersion(user), proof });
+    const { cid, options } = await challenges.issue(() => moreOptions(user),
+      { uid: user.id, kind: 'add', sv: sessionVersion(user), proof });
     json(res, 200, { cid, options });
   },
 
@@ -1561,8 +1554,8 @@ const passkeyRoutes = {
       return json(res, 400, LINK_INVALID);
     }
     if (passkeyCount(user) >= MAX_PASSKEYS) return json(res, 409, LIMIT);
-    const options = await moreOptions(user);
-    const cid = putChallenge({ challenge: options.challenge, uid: user.id, kind: 'link', lh: link.h });
+    const { cid, options } = await challenges.issue(() => moreOptions(user),
+      { uid: user.id, kind: 'link', lh: link.h });
     json(res, 200, { cid, options, id: user.id, name: user.name });
   },
 
@@ -1790,14 +1783,13 @@ const routes = {
       return json(res, 403, { error: 'a valid invite code is required' });
     }
     const uid = crypto.randomBytes(12).toString('base64url');
-    const options = await generateRegistrationOptions({
+    const { cid, options } = await challenges.issue(() => generateRegistrationOptions({
       rpName: RP_NAME, rpID: RP_ID,
       userID: Buffer.from(uid), userName: name, userDisplayName: name,
       attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
       excludeCredentials: []
-    });
-    const cid = putChallenge({ kind: 'register', challenge: options.challenge, name, uid, code });
+    }), { kind: 'register', name, uid, code });
     json(res, 200, { cid, options });
   },
 
@@ -1857,10 +1849,9 @@ const routes = {
   },
 
   'POST /api/login/options': async (req, res) => {
-    const options = await generateAuthenticationOptions({
+    const { cid, options } = await challenges.issue(() => generateAuthenticationOptions({
       rpID: RP_ID, userVerification: 'preferred', allowCredentials: []
-    });
-    const cid = putChallenge({ kind: 'login', challenge: options.challenge });
+    }), { kind: 'login' });
     json(res, 200, { cid, options });
   },
 
@@ -2433,6 +2424,10 @@ const server = http.createServer(async (req, res) => {
   try { await handler(req, res); }
   catch (e) {
     if (e?.clientGone) { console.warn(key, 'client went away mid-body:', e.message); return; }
+    if (e instanceof ChallengeBusyError) {
+      return json(res, 503, { error: 'passkey sign-in is busy — try again shortly', code: 'challenge-busy' },
+        { 'Retry-After': String(e.retryAfter) });
+    }
     if (e instanceof HttpError) {
       if (!res.headersSent) json(res, e.status, { error: e.message });
       return;
