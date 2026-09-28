@@ -5,7 +5,8 @@ metadata:
   name: opengym-data
 spec:
   accessModes:
-    - ReadWriteOnce
+    # Requires a CSI driver supporting RWOP. RWO permits multiple pods on one node.
+    - ReadWriteOncePod
   resources:
     requests:
       storage: 2Gi

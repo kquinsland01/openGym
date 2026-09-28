@@ -74,6 +74,12 @@ const MAX_BODY = 5 * 1024 * 1024;
 // Secure cookies require HTTPS; over plain http://localhost the flag would drop the cookie
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
+// Production must enter through start.sh, which holds the filesystem lock across
+// exec for this process's lifetime. Bare node remains available for isolated tests.
+if (process.env.NODE_ENV === 'production' && process.env.OPENGYM_WRITER_LOCK !== '1') {
+  throw new Error('Start production openGym with npm start or ./start.sh to acquire the data writer lock');
+}
+
 fs.mkdirSync(DATA, { recursive: true });
 /* The secrets are locked down file by file rather than by sealing the whole directory.
  *

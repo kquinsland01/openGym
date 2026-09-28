@@ -11,8 +11,8 @@ media once; here that is an initContainer. There are only a few resources to cre
 - 2 PVCs: `opengym-data` (users, passkeys, workouts, uploads — **back this one up**) and
   `opengym-media` (the exercise images, downloaded again if lost).
 - 1 Deployment running the API and the web container in a single pod, for simplicity. It stays at
-  one replica with the `Recreate` strategy: the API's data is files on a `ReadWriteOnce` volume,
-  and two API processes must never write them at once.
+  one replica with the `Recreate` strategy: the API's data is files on a `ReadWriteOncePod` volume,
+  and two API processes must never write them at once. This requires a compatible CSI driver.
 - An HTTPRoute (the example uses the Gateway API; an Ingress to the `opengym` Service on port 80
   works as well), plus a cert-manager Certificate for the hostname.
 
@@ -25,6 +25,33 @@ kubectl apply -k kubernetes/
 ```
 
 Notes:
+
+- **Single writer (K8S-02).** The data PVC requires `ReadWriteOncePod`; the media PVC can
+  remain `ReadWriteOnce`. The API additionally starts under a nonblocking kernel `flock`
+  on `/data/.writer.lock`. A competing process exits with status 73 before loading data.
+  Never delete, rename, restore over, or replace this lock file while an instance may be
+  alive: ownership belongs to its inode, not its filename. It contains no persistent
+  ownership record and needs no stale-lock cleanup after a crash. Production bare-node
+  launches are refused; use the image's default command or `npm start` on a Linux host
+  with util-linux `flock` installed. Do not override `OPENGYM_WRITER_LOCK`.
+- **Storage prerequisites.** Use Kubernetes 1.29+ and a CSI implementation with RWOP
+  support and coherent filesystem locks. Verify locking across the actual mounts before
+  deployment; filesystems with disabled/broken advisory locking are unsupported. RWOP
+  scheduling and file locks are complementary, not a distributed database or a guarantee
+  against a malfunctioning storage backend. Keep one replica and do not configure HPA.
+- **Existing PVCs.** Do not apply the access-mode change blindly to a bound RWO claim.
+  Take a verified backup, stop the Deployment and confirm every old pod is gone, then use
+  the storage driver's documented migration/restore procedure into an RWOP claim. Preserve
+  the source PV with a suitable reclaim policy during migration. Kubernetes documents the
+  prerequisites and maintenance procedure in
+  [migrating to ReadWriteOncePod](https://kubernetes.io/docs/tasks/administer-cluster/change-pv-access-mode-readwriteoncepod/).
+  Do not weaken the claim back to RWO to work around an unsupported provisioner.
+- **Node loss and recovery.** Before force-deleting an unreachable pod or force-detaching
+  storage, fence the old node through the infrastructure/storage provider and prove it
+  cannot still write. Let the CSI driver detach/attach normally whenever possible. Never
+  remove a lock to force a second writer through. Test graceful pod deletion, SIGKILL,
+  node loss and restore on disposable storage; a restart must retain accounts and state.
+  A singleton rollout has downtime, and these controls do not provide HA.
 
 - The manifests create and use the `fitness` namespace (`kubernetes/namespace.yaml`, set on every
   resource by `kubernetes/kustomization.yaml`; rename it in both), and a Gateway
