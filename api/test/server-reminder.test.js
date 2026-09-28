@@ -102,7 +102,7 @@ test('a non-array workouts on disk is logged and skipped by the reminder tick; t
   }
 
   assert.equal(h.child.exitCode, null, `server exited:\n${h.log}`);
-  assert.match(h.log, /reminder tick u_test_1 TypeError/, h.log);
+  assert.match(h.log, /reminder tick u_test_1 StorageError/, h.log);
   assert.match(h.log, /reminder firing u_test_2 r1/, h.log);
   assert.equal((await fetch(`${h.api}/api/health`)).status, 200);
   const db = JSON.parse(fs.readFileSync(path.join(h.dataDir, 'db.json'), 'utf8'));
