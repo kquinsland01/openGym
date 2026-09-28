@@ -12,6 +12,7 @@
  * up, cannot run forever, and cannot lie about what happened when the container restarts.
  */
 import fs from 'node:fs';
+import { atomicWrite, durableMkdir } from '../durable-write.js';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,10 +55,8 @@ export function readUser(uid) {
   catch { return { ...EMPTY }; }
 }
 function writeUser(uid, rec) {
-  fs.mkdirSync(COACH_DIR, { recursive: true, mode: 0o700 });
-  const file = userFile(uid), tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(rec), { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  durableMkdir(COACH_DIR);
+  atomicWrite(userFile(uid), JSON.stringify(rec), 0o600);
 }
 function patchUser(uid, patch) {
   const rec = { ...readUser(uid), ...patch };

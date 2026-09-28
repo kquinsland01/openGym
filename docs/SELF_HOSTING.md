@@ -467,39 +467,16 @@ are not encrypted at rest — whoever can read that folder can see them.
 
 ## 6. Backups
 
-Everything is in `./data`:
+Back up the **complete** `./data` volume only after all writers have stopped. A live
+`tar data/` may combine files from different updates; excluding uploads does not provide a
+complete recovery copy. Include `secret`, `db.json`, `vapid.json`, all profiles, Coach files,
+`uploads/` and audit data. The secret signs sessions and decrypts stored Coach credentials.
 
-```bash
-tar czf opengym-backup-$(date +%F).tar.gz data/
-```
-
-That archive contains all profiles, passkeys and workout history — and, if the activity log is
-on, `audit.log` with everyone's sign-in times. Worth knowing before you ship the archive to a
-backup service you don't run. Restore by unpacking it back into the project folder. (Individual
-users can also export their own data as JSON from Settings.)
-
-The photos and videos of custom exercises are in `data/uploads/`, and they are most of what makes
-the archive large. To leave them out:
-
-```bash
-tar czf opengym-backup-$(date +%F).tar.gz --exclude=data/uploads data/
-```
-
-Restored without them, every profile is intact, and an exercise whose file is gone shows a
-placeholder until one of its owner's devices — each keeps its own copy — uploads it again. When
-you move openGym to another server, copy the whole `data/`, `uploads/` included; each person can
-also carry their own through Settings → *Export with photos & videos* and import it there.
-
-If you enabled the AI Coach with the Codex provider, note what this archive deliberately does
-**not** contain: `./coach-auth`, where that provider keeps its refreshable sign-in. It is a
-sibling of `./data` rather than a folder inside it precisely so that a live credential does not
-end up in every backup you are told to make — an archive like this gets copied to laptops and
-cloud drives, and a refresh token keeps working wherever it lands. Nothing in `./coach-auth`
-needs backing up: if you lose it, sign the provider in again.
-
-API keys for the HTTPS providers (Anthropic, OpenAI, Gemini, a compatible endpoint) are the
-other way round: they are in `./data/coach.json`, encrypted with `./data/secret`, so they *are*
-in this archive — and unreadable without the secret next to them, like everything else in it.
+Use the encrypted off-volume backup helper, restore validator and operational procedure in
+[Backup and recovery](BACKUP_RECOVERY.md). That procedure defines an initial RPO/RTO target,
+retention and restore drills. Individual Settings exports are useful but do not replace an
+instance backup. Separately stored `./coach-auth` CLI logins require provider reauthentication
+after recovery; keep that explicit rather than silently relying on lost credentials.
 
 ## 7. Notifications
 
