@@ -6,7 +6,7 @@
   "main": "server.js",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "start": "node server.js",
+    "start": "sh start.sh",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
