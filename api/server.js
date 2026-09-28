@@ -1,6 +1,7 @@
 /* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
    No framework, JSON-file storage, signed session cookies.               */
 import http from 'node:http';
+import { createStorageHealth, storageWrite, storageFailure } from './storage-health.js';
 import { readJson, validateDb, validateState, StorageError } from './storage-read.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -94,6 +95,7 @@ const lock = f => { try { fs.chmodSync(path.join(DATA, f), 0o600); } catch { /* 
 const secretFile = path.join(DATA, 'secret');
 if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
 const SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+if (!SECRET) throw new Error('Storage integrity failure: session secret is empty');
 
 const dbFile = path.join(DATA, 'db.json');
 const db = readJson(dbFile, validateDb, { users: [], creds: [], subs: [], invites: [] });
@@ -109,9 +111,11 @@ const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(us
 // the whole directory; now that the directory stays traversable, the file carries its own mode.
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2), 0o600); }
 function atomicWrite(file, content, mode) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
-  fs.renameSync(tmp, file);
+  storageWrite(file, () => {
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, content, mode ? { mode } : undefined);
+    fs.renameSync(tmp, file);
+  });
 }
 const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
 // When a profile last fetched its document (GET /api/data). The document's own `_ts` moves only
@@ -142,9 +146,10 @@ const records = v => (Array.isArray(v) ? v.filter(record) : []);
 
 /* ---------- push notifications (Web Push / VAPID) ---------- */
 const vapidFile = path.join(DATA, 'vapid.json');
-let vapid;
-try { vapid = JSON.parse(fs.readFileSync(vapidFile, 'utf8')); }
-catch { vapid = webpush.generateVAPIDKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
+let vapid = readJson(vapidFile, value => {
+  if (!value || typeof value.publicKey !== 'string' || typeof value.privateKey !== 'string') throw new Error('invalid VAPID key record');
+});
+if (!vapid) { vapid = webpush.generateVAPIDKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || (SECURE ? ORIGIN : 'mailto:admin@localhost');
 webpush.setVapidDetails(VAPID_SUBJECT, vapid.publicKey, vapid.privateKey);
 
@@ -1738,7 +1743,10 @@ const mediaRoutes = {
 
 /* ---------- routes ---------- */
 const routes = {
-  'GET /api/health': async (req, res) => json(res, 200, { ok: true, users: db.users.length }),
+  // Liveness is deliberately independent of storage: restarting cannot repair a PVC.
+  'GET /api/healthz': async (req, res) => json(res, 200, { ok: true }, { 'Cache-Control': 'no-store' }),
+  'GET /api/readyz': async (req, res) => readiness(res),
+  'GET /api/health': async (req, res) => readiness(res),
 
   // Public config the login screen needs before anyone is signed in. `coach` is absent unless
   // the instance has both switched the Coach on and successfully connected a provider — the
@@ -2395,6 +2403,12 @@ function bodyDeadline(req) {
   req.allowSlowBody = clear;
 }
 
+const storageHealth = createStorageHealth(DATA);
+function readiness(res) {
+  const ok = storageHealth.ready();
+  json(res, ok ? 200 : 503, { ok }, { 'Cache-Control': 'no-store' });
+}
+
 const server = http.createServer(async (req, res) => {
   bodyDeadline(req);
   // Same-origin (the deployed nginx-proxied web app) never triggers CORS, so this only matters
@@ -2440,6 +2454,8 @@ const server = http.createServer(async (req, res) => {
   }
   try { await handler(req, res); }
   catch (e) {
+    if (e instanceof StorageError) storageFailure(e, e.file);
+    if (['EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EDQUOT', 'EIO', 'ESTALE', 'ENOTDIR'].includes(e?.code)) storageFailure(e, e.path);
     if (e?.clientGone) { console.warn(key, 'client went away mid-body:', e.message); return; }
     if (e instanceof HttpError) {
       if (!res.headersSent) json(res, e.status, { error: e.message });

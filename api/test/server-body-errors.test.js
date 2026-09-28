@@ -82,5 +82,5 @@ test('a client that hangs up mid-body costs one log line and no stack', async t 
   assert.deepEqual(stackLines(h.log), [], `nothing to trace:\n${h.log}`);
   assert.equal((h.log.match(/client went away mid-body/g) || []).length, aborts, `one line each:\n${h.log}`);
   assert.equal(fs.existsSync(path.join(h.dataDir, 'state-u_body_1.json')), false, 'and nothing was written');
-  assert.equal((await fetch(`${h.api}/api/health`)).status, 200);
+  assert.equal((await fetch(`${h.api}/api/healthz`)).status, 200);
 });

@@ -75,8 +75,8 @@ ENV MEDIA_UPLOAD_MAX=48m
 # hardcoded http://localhost/ breaks on any instance that changed it), and address it as
 # 127.0.0.1: envsubst rewrites the conf after the image's IPv6 script, so nginx ends up
 # listening on IPv4 only while "localhost" resolves to ::1 first.
-HEALTHCHECK --interval=5m \
+HEALTHCHECK --interval=10s \
             --timeout=5s \
             --retries=3 \
-            CMD wget --spider -q "http://127.0.0.1:${NGINX_PORT}/" || exit 1
+            CMD wget -q -O /dev/null "http://127.0.0.1:${NGINX_PORT}/readyz" || exit 1
 

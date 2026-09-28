@@ -36,7 +36,7 @@ test('GET /api/data/rev tracks PUT /api/data', async t => {
   child.stderr.on('data', d => { log += d; });
   const port = await boundPort(child, () => log);
   const base = `http://127.0.0.1:${port}`;
-  assert.equal((await fetch(`${base}/api/health`)).status, 200);
+  assert.equal((await fetch(`${base}/api/healthz`)).status, 200);
 
   const h = { cookie: cookie(), origin: 'http://localhost:8080', 'content-type': 'application/json' };
   assert.equal((await fetch(`${base}/api/data/rev`)).status, 401);

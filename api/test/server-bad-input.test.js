@@ -121,7 +121,7 @@ test('a body over the 5 MiB cap is a 413 that every client gets to read, and not
   // arrive, but the process must not be left reading, and must still serve.
   const huge = 'x'.repeat(11 * 1024 * 1024);
   await rawPut(h, new http.Agent(), huge).catch(() => {});
-  r = await status(h, 'GET', '/api/health', {});
+  r = await status(h, 'GET', '/api/healthz', {});
   assert.equal(r.status, 200);
   assert.equal(h.stackFrames(), 0, `stack traces in the log:\n${h.log}`);
 });

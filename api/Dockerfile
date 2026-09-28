@@ -53,17 +53,17 @@ RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 # Every module server.js imports from the api root has to be named here: the image carries nothing
 # else, and one that is missing only shows at boot, as ERR_MODULE_NOT_FOUND.
-COPY server.js push-messages.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js media.js storage-read.js ./
+COPY server.js push-messages.js verify-error.js password.js rate-limit.js passkeys-store.js device-link.js media.js storage-read.js storage-health.js storage-health-worker.js ./
 COPY coach ./coach
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "server.js"]
 
-HEALTHCHECK --interval=5m \
+HEALTHCHECK --interval=10s \
             --timeout=5s \
             --retries=3 \
-            CMD wget --spider -q "http://127.0.0.1:${PORT}/api/health" || exit 1
+            CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/api/readyz" || exit 1
 
 # ---------------------------------------------------------------------------------------------
 # The opt-in target. Dropping --omit=optional is the whole difference: it pulls in

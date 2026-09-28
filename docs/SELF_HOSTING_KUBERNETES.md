@@ -51,3 +51,12 @@ Notes:
   overwrites whatever a client sent; pass that through with `CF_CONNECTING_IP` on the `web`
   container (as `.env.example` describes for Cloudflare), turn on `TRUST_PROXY=1` on the `api`
   container, and add a NetworkPolicy so only the web container's pod reaches port 3000.
+
+### Process and storage probes
+
+The source manifests now use distinct `/api/healthz` and `/api/readyz` API probes
+and `/healthz` and `/readyz` web probes. Build both updated images before rollout;
+upstream 1.3.9 lacks these endpoints. Readiness failure removes traffic; a PVC or
+API outage alone does not fail the other process's liveness. See
+[the probe contract and recovery behavior](HEALTH_CHECKS.md) for timings, storage
+requirements, quiet successful probes, and cluster acceptance checks.

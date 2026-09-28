@@ -78,7 +78,7 @@ test('an unwritable ./data cannot take the process down through the rest timer n
   writable(h);
 
   assert.equal(h.exited, null, `the api exited on a failed prune save:\n${h.log}`);
-  assert.equal((await fetch(`${h.api}/api/health`)).status, 200, 'still serving');
+  assert.equal((await fetch(`${h.api}/api/healthz`)).status, 200, 'still serving');
   assert.match(h.log, /push: could not save db.json/, 'and it said so, once, without a stack');
 });
 
