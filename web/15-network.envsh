@@ -1,0 +1,31 @@
+#!/bin/sh
+# Sourced before envsubst by nginx's entrypoint (or our hardened entrypoint).
+# Separate IPv4/IPv6 sockets avoid depending on the host's bindv6only setting.
+case "${NGINX_IPV6:=on}" in
+    on) NGINX_IPV6_LISTEN="listen [::]:${NGINX_PORT:-80} ipv6only=on;" ;;
+    off) NGINX_IPV6_LISTEN="" ;;
+    *) echo 'NGINX_IPV6 must be on or off' >&2; exit 1 ;;
+esac
+case "${RESOLVER_IPV6:=on}" in
+    on|off) ;;
+    *) echo 'RESOLVER_IPV6 must be on or off' >&2; exit 1 ;;
+esac
+
+# nginx requires brackets around IPv6 DNS servers. Accept raw addresses copied
+# from /etc/resolv.conf, already bracketed addresses, IPv4, and optional ports.
+# A custom IPv6 DNS port must use [address]:port to avoid ambiguity.
+opengym_resolvers=""
+for opengym_resolver in ${RESOLVER:-127.0.0.11}; do
+    case "$opengym_resolver" in
+        \[*) ;;
+        *:*:*) opengym_resolver="[$opengym_resolver]" ;;
+    esac
+    opengym_resolvers="${opengym_resolvers:+$opengym_resolvers }$opengym_resolver"
+done
+RESOLVER="$opengym_resolvers"
+case "${BACKEND:=api}" in
+    \[*) ;;
+    *:*:*) BACKEND="[$BACKEND]" ;;
+esac
+export NGINX_IPV6_LISTEN RESOLVER_IPV6 RESOLVER BACKEND
+unset opengym_resolvers opengym_resolver

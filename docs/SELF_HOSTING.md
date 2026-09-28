@@ -692,3 +692,6 @@ effect on an already-built image — the bundle has already made up its mind.
 They are only useful if you build the frontend yourself (`docker compose up -d --build`, or a
 `npm run build` with the variables exported). If you need to redirect media on a prebuilt
 image, do it in your reverse proxy instead.
+
+For IPv6 listeners, AAAA-only API Services, and IPv4-only compatibility, see
+[IPv4 and IPv6 web networking](IPV6.md).
